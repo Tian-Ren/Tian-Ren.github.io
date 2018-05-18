@@ -1,0 +1,216 @@
+---
+title: "Kickstarter Projects Data"
+author: "Tian Ren"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE)
+library(tidyverse)
+library(lubridate)
+library(readr)
+library(dplyr)
+```
+
+### Introduction
+
+Have you ever come up with some genius idea that could shake the world but never get launched because of the short of fund? Well, now you can use crowdfunding platform, but do you know which deadline can get you the highest backing rate? We will try to answer this question by walking through a complete data science project in this tutorial.
+
+
+### Required Tools
+You will need to install R and Rstudio for this project.
+
+To install R in your computer go to https://cran.r-project.org/index.html and download and install the appropriate binary file.   
+
+To install Rstudio go to https://www.rstudio.com/products/rstudio/download/ and download the appropriate version of Rstudio.  
+
+Some R libraries are also needed:
+
+* tidyverse
+
+Finally, you will need the Kickstarter Projects Data, which can be obtained at https://www.kaggle.com/kemical/kickstarter-projects/data.
+
+### 1. Data Processing
+The data we acquired is a comma-separated value file (`.csv`). In order to use it in the project, we first need to read it into a varibale in R. 
+```{r}
+# Read the data from file
+kickstarter_table <- read_csv("ks-projects-201801.csv")
+# Print first 6 rows of the data
+head(kickstarter_table)
+```
+
+##### 1.1 Data Observing
+Before we start to clean the data, we need to take a look at our data. This will help us decide which operations are needed in the next step. Here we can see some basic features of the data, such as name, category, goal, and other factors of projects. Also, by observing, we do not see obvious sign of missing data. 
+
+##### 1.2 Data Processing
+Most of the features were automatically parsed when imported into the dataframe. However, we still want to convert `launched` into `date_format`.
+
+```{r}
+kickstarter_table <- kickstarter_table %>%
+  mutate(launched = as.Date(launched))
+  kickstarter_table
+```
+We noticed that some of the features are replicates of the same value. So we perform a `select` operation to remove the redundant features, then rename some of the left features for easy use. To make sure there is no missing data in our table, we will leave out the rows with `NA`s since it seems unlikely to have a lot of missing data in the dataset.
+
+```{r}
+kickstarter_table <- kickstarter_table %>%
+  select(
+  c(
+  "ID",
+  "name",
+  "main_category",
+  "category",
+  "currency",
+  "launched",
+  "deadline",
+  "state",
+  "backers",
+  "country",
+  "usd_pledged_real",
+  "usd_goal_real"
+  )
+  ) %>%
+  rename(pledged = usd_pledged_real, goal = usd_goal_real) %>%
+  arrange(launched)
+  na.omit(kickstarter_table)
+```
+Since our goal is to discriminate successful projest from failed projects, we only choose the data of our interest. Then, we can add two more features: days the crowdfunding lasted and word count of the name.
+```{r}
+ks_df <- kickstarter_table %>%
+  filter(state == "successful" | state == "failed") %>%
+  mutate(days = as.integer(deadline - launched),
+  word_count = lengths(strsplit(name, " ")))
+  ks_df
+```
+
+### 2. Exploratory Data Analysis
+At this point, we will perform Exploratory Data Analysis to better understand the data at hand, and help us make decisions about appropriate statistical or Machine Learning methods, or data transformations that may be helpful to do. Also, we will focus more on the statistics of successful and failed projects so we can discover any trend or indicators that would be able to used in our training model.
+
+We can see how does the number of successful projects change over time by plotting a box plot.
+```{r}
+ks_df%>%
+  filter(state == "successful") %>%
+  group_by(launch_date=factor(launched)) %>%
+  summarise(count=n()) %>%
+  ggplot(mapping = aes(x=year(launch_date),y=count)) +
+  geom_boxplot(aes(group=year(launch_date))) +
+  labs(title = "Success Count vs Launched Date",x = "Launched",y="Count")
+```
+
+
+
+First, let's take a look at the proportion of successful cases. We can see only 40% of the projects in our data were successful.
+```{r}
+ks_df %>%
+  group_by(state) %>%
+  summarise(count = n()) %>%
+  mutate(frac=count/nrow(ks_df)) %>%
+  ggplot(aes(x = "", y = frac, fill = state)) +
+  geom_bar(width = 0.5, stat = "identity", position = "dodge") +
+  labs(title = "Failed vs Successful",x = "",y="fraction")
+```
+
+Second, we will see the case number comparisons between successful and failed across different main categories. The differences are remarkable in both number and ratio across category.
+```{r fig.height=4.9}
+ks_df %>%
+  group_by(main_category,state) %>%
+  summarise(cnt = n()) %>%
+  ggplot(aes(x = main_category, y= cnt, fill = state)) +
+geom_bar(stat="identity", width=.5, position = "dodge")  +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(title = "Failed vs Successful Across Category",x = "Main Category",y="Count")
+ 
+```
+
+We can also explore the relationship between state and goal by plotting a scatter plot. We can infer from the plot that average goal for failed projects are generally much higher that those of succeeded.
+```{r}
+ks_df%>%
+  group_by(main_category, state) %>%
+  summarise(mean_goal = mean(goal)) %>%
+  ggplot(mapping = aes(x=main_category,y=mean_goal, color=state)) +
+  geom_point() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(title = "Average Goal vs Main Category",x = "Main Category",y="Average Goal")
+
+```
+
+Then you might ask if successful projects had lasted longer than the failed. Let's draw a scatter plot to address the issue. The result is a little surprise but makes sense after some thinking: successful projects are usually popular thus fill up quickly while failed projects are difficult to get any attention so they need to wait longer.
+```{r}
+ks_df%>%
+  group_by(main_category, state)%>%
+  summarise(mean_days=mean(days)) %>%
+  ggplot(mapping = aes(x=main_category,y=mean_days, color=state)) +
+  geom_point() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(title = "Average Days vs Main Category",x = "Main Category",y="Average Days")
+```
+
+
+Next, we can see some statistics to explore the data from another perspective.
+```{r}
+ks_df%>%
+  group_by(state) %>%
+  summarise(mean_goal=mean(goal))
+  
+```
+It is very surprising that the average goal failed projects held is more than 6 times of successful cases'.  
+
+### 3. Machine Learning
+Machine learning is all about finding patterns in data and being able to make predictions. Our data include a feature `state`, which can be seen as the label of the project. We'll use a specific kind of learning algorithm called supervised machine learning because we have access to the true result (successful/failed) of each project in our dataset. In supervised machine, we'll train some predictor using some portion of the data as our trainning data, and we'll see how well this predictor predicts by testing it using the other portion of the data.
+
+#### 3.1 Choosing Hypothesis
+We have already decided to train our machine to predict if a project will be succeed or not given the features of it. The next step is choosing what our hypothesis is. Our data doesn't seem to be linear or follow the form of a well-defined function, so we want to use a non linear model. We want to choose from Decision Tree and Random Forest. We'll learn how to find the better.
+
+#### 3.2 Training Algorithms
+There are many ways to predict the success of a Kickstarter Project, and since predicting whether a project will be successful or not is binary, we will be using classification models for the prediction. 
+
+A decision tree is a flowchart-like structure in which each internal node represents a "test" on an attribute (e.g. whether a coin flip comes up heads or tails), each branch represents the outcome of the test, and each leaf node represents a class label (decision taken after computing all attributes). The paths from root to leaf represent classification rules.
+
+Random forests are an ensemble learning method for classification, regression and other tasks, that operate by constructing a multitude of decision trees at training time and outputting the class that is the mode of the classes (classification) or mean prediction (regression) of the individual trees. For more information, look here: https://en.wikipedia.org/wiki/Random_forest.
+
+#### 3.3 Splitting Data
+Now we're ready to split our data into test and training. We will not touch the test data until we have a model to test after splitting. When we split our data into test and train, we want as little difference in the distribution between these two datasets as possible. So we'll shuffle our data before splitting.
+
+We also need to decide how much to train on and how much to test on. More training data will improve model's generalization. Hence we put more data into training than testing. The general approach is to have 1/10 of the data as test data.
+
+```{r}
+# Randomize the data
+randomized_df <- sample_frac(ks_df, 1)
+# Split the data
+cutoff <- as.integer(nrow(randomized_df)/10)
+ks_train <- slice(randomized_df, 0:cutoff)
+ks_test <- slice(randomized_df, cutoff+1:n())
+ks_test
+```
+We need to factor the non-numeric features to be able to train.
+```{r}
+ks_train <- ks_train %>%
+  mutate(
+  category = as.integer(factor(category)),
+  main_category = as.integer(factor(main_category)),
+  currency = as.integer(factor(currency)),
+  country = as.integer(factor(country)),
+  launched = as.numeric(launched),
+  deadline = as.numeric(deadline),
+  state = as.integer(factor(state))
+  ) %>%
+  select(-name)
+
+ks_test <- ks_test %>%
+  mutate(
+  category = as.integer(factor(category)),
+  main_category = as.integer(factor(main_category)),
+  currency = as.integer(factor(currency)),
+  country = as.integer(factor(country)),
+  launched = as.numeric(launched),
+  deadline = as.numeric(deadline),
+  state = as.integer(factor(state))
+  ) %>%
+  select(-name)
+```
+
+#### 3.4 Cross-Validation
+To check which model does a better job, we can split our training data into two parts: one for training and one for validation. Validation data is data we just use to test the two algorithms' performances. We'll test with 10 different possible training/validation splits, just for more accuracy.
+
+
+### 4. Hypothesis Testing
